@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acompanhamento de Obras - Cloud Sincronizado</title>
+    
+    <!-- Bibliotecas do Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #f0f2f5; --text-color: #333333; --box-bg: #ffffff;
+            --box-border: #cccccc; --line-color: #888888; --hover-color: #eaf4fb;
+            --grid-color: rgba(0, 0, 0, 0.06); --drag-handle-bg: #f5f5f5; --drag-handle-text: #888888;
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color); color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; user-select: none;
+        }
+
+        #controls {
+            position: fixed; top: 0; left: 0; width: 100%; padding: 15px;
+            background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid var(--box-border);
+            z-index: 1000; display: flex; gap: 15px; align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            padding: 8px 12px; border: 1px solid var(--box-border); border-radius: 4px;
+            background: #ffffff; color: #333; outline: none; width: 200px;
+        }
+
+        button {
+            padding: 8px 15px; border: none; border-radius: 4px; background: #007acc;
+            color: white; cursor: pointer; font-weight: bold; transition: background 0.2s;
+        }
+        button:hover { background: #005999; }
+        .btn-success { background: #2b7a0b; }
+        .btn-success:hover { background: #1e5c07; }
+        .btn-danger-outline { background: transparent; color: #cc0000; border: 1px solid #cc0000; }
+        .btn-danger-outline:hover { background: #ffe6e6; color: #990000; }
+
+        #trash-zone {
+            margin-left: auto; margin-right: 30px; padding: 10px 20px;
+            border: 2px dashed #cc0000; border-radius: 8px; color: #cc0000;
+            font-weight: bold; display: flex; align-items: center; transition: all 0.2s; background: #fff5f5;
+        }
+        #trash-zone.drag-over { background: rgba(204, 0, 0, 0.1); transform: scale(1.05); }
+
+        #canvas-container { width: 100%; height: 100%; cursor: grab; position: relative; }
+        #canvas-container:active { cursor: grabbing; }
+
+        #zoom-layer {
+            position: absolute; transform-origin: 0 0; width: 6000px; height: 6000px;
+            background-size: 50px 50px;
+            background-image: linear-gradient(to right, var(--grid-color) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+        }
+
+        #edges-svg, #temp-edge-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        #temp-edge-svg { z-index: 2; }
+
+        .node {
+            position: absolute; background: var(--box-bg); border: 1px solid var(--box-border);
+            border-radius: 6px; box-sizing: border-box; z-index: 5;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08); display: flex; flex-direction: column;
+        }
+
+        .resize-handle {
+            position: absolute; bottom: 0; right: 0; width: 15px; height: 15px;
+            cursor: nwse-resize; z-index: 30; border-bottom-right-radius: 6px;
+        }
+        .node:hover .resize-handle { background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.1) 50%); }
+
+        .drag-handle {
+            height: 18px; background: var(--drag-handle-bg); border-radius: 5px 5px 0 0; cursor: move;
+            display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--drag-handle-text);
+            margin-bottom: 5px; border-bottom: 1px solid var(--box-border);
+        }
+
+        .node.drag-over { border-color: #00aaff; box-shadow: 0 4px 15px rgba(0,170,255,0.2); }
+        .node-conclusion { border-color: #ffb3b3; background: #fffcfc; }
+        .node-conclusion .node-title { color: #cc0000; }
+
+        .node-content { padding: 0 12px 12px 12px; display: flex; flex-direction: column; flex-grow: 1; }
+
+        [contenteditable="true"] { cursor: text; padding: 2px; border-radius: 3px; border: 1px solid transparent; }
+        [contenteditable="true"]:hover { border-color: #ccc; background: rgba(0,0,0,0.02); }
+        [contenteditable="true"]:focus { border-color: #00aaff; background: #fff; outline: none; }
+
+        .node-title { font-size: 13px; font-weight: 600; text-align: center; color: #111; }
+        .node-subtitle { font-size: 11px; color: #666; text-align: center; text-transform: uppercase; font-weight: bold; }
+
+        .works-container {
+            flex-grow: 1; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start;
+            gap: 6px; border-top: 1px dashed #ccc; padding-top: 8px; min-height: 35px; margin-top: 5px;
+        }
+
+        .work-tag {
+            padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white;
+            cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.15); z-index: 10;
+            width: fit-content; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        .edge-label {
+            position: absolute; background: #ffffff; border: 1px solid #aaaaaa; padding: 4px 10px;
+            border-radius: 12px; font-size: 11px; font-weight: bold; color: #333333; z-index: 3;
+            transform: translate(-50%, -50%); box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: context-menu;
+        }
+
+        .edge-handle { fill: #ffffff; stroke: #007acc; stroke-width: 2.5; cursor: move; pointer-events: all; }
+        .edge-handle:hover { r: 7; stroke-width: 4; }
+
+        .anchor {
+            position: absolute; width: 12px; height: 12px; background: #007acc; border-radius: 50%;
+            border: 2px solid white; cursor: crosshair; opacity: 0; z-index: 20; transform: translate(-50%, -50%);
+        }
+        .node:hover .anchor { opacity: 0.6; }
+        .anchor:hover { opacity: 1 !important; transform: translate(-50%, -50%) scale(1.4); }
+
+        .anchor.top-1 { top: 0; left: 25%; } .anchor.top-2 { top: 0; left: 50%; } .anchor.top-3 { top: 0; left: 75%; }
+        .anchor.bottom-1 { top: 100%; left: 25%; } .anchor.bottom-2 { top: 100%; left: 50%; } .anchor.bottom-3 { top: 100%; left: 75%; }
+        .anchor.left-1 { top: 25%; left: 0; } .anchor.left-2 { top: 50%; left: 0; } .anchor.left-3 { top: 75%; left: 0; }
+        .anchor.right-1 { top: 25%; left: 100%; } .anchor.right-2 { top: 50%; left: 100%; } .anchor.right-3 { top: 75%; left: 100%; }
+
+        #context-menu {
+            position: fixed; background: white; border: 1px solid #ccc; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border-radius: 6px; padding: 5px 0; z-index: 10000; display: none; flex-direction: column; min-width: 160px; font-size: 13px;
+        }
+        .context-menu-item { padding: 10px 15px; cursor: pointer; color: #333; display: flex; align-items: center; gap: 10px; }
+        .context-menu-item:hover { background: #f0f0f0; }
+        .context-menu-item.danger { color: #cc0000; border-top: 1px solid #eee; }
+
+        /* Tela de Carregamento da Nuvem */
+        #cloud-loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-color); z-index: 9999; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; font-size: 20px; font-weight: bold; color: #007acc;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #ccc; border-top-color: #007acc;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="cloud-loading">
+        <div class="spinner"></div>
+        A sincronizar com a Nuvem...
+    </div>
+
+    <div id="controls">
+        <input type="text" id="newWorkInput" placeholder="Nome da nova obra..." onkeypress="handleEnter(event)">
+        <button onclick="addWork()">Adicionar Obra</button>
+        <button onclick="exportData()" class="btn-success" style="margin-left: auto;">Descarregar Cópia (Opcional)</button>
+        <button onclick="hardReset()" class="btn-danger-outline" style="margin-left: 15px;">Repor Fluxo</button>
+        <div id="trash-zone" ondragover="allowDrop(event)" ondrop="dropTrash(event)" ondragenter="dragEnterTrash(event)" ondragleave="dragLeaveTrash(event)">
+            🗑️ Arraste a obra aqui p/ excluir
+        </div>
+    </div>
+
+    <div id="context-menu">
+        <div class="context-menu-item" onclick="contextEditEdge()">✏️ Editar Texto</div>
+        <div class="context-menu-item danger" onclick="contextDeleteEdge()">🗑️ Excluir Seta</div>
+    </div>
+
+    <div id="canvas-container" onwheel="zoom(event)">
+        <div id="zoom-layer">
+            <svg id="edges-svg"></svg>
+            <svg id="temp-edge-svg"><path id="temp-line" stroke="#007acc" stroke-width="3" stroke-dasharray="5,5" fill="none" marker-end="url(#arrow)"/></svg>
+            <div id="nodes-container"></div>
+            <div id="labels-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // =========================================================
+        // 1. CONFIGURAÇÃO DO FIREBASE COM AS SUAS CHAVES
+        // =========================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDd_6ll6MjQ8bk9wk4I_oxSGuGp9-DwT5Y",
+            authDomain: "app-fluxograma.firebaseapp.com",
+            projectId: "app-fluxograma",
+            storageBucket: "app-fluxograma.firebasestorage.app",
+            messagingSenderId: "677126876384",
+            appId: "1:677126876384:web:f0d55c7af6a4a544663485"
+        };
+
+        // Inicializa o Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const docRef = db.collection("painel_obras").doc("dados_gerais");
+
+        // =========================================================
+        // 2. DADOS PADRÃO (Caso o banco de dados esteja vazio)
+        // =========================================================
+        const defaultNodes = {
+            'relacao': { x: 100, y: 150, title: 'Relação atualizada', subtitle: 'OBRA', w: 250, h: 190 },
+            'confrontar': { x: 450, y: 150, title: 'Confrontar a relação...', subtitle: 'Rafael', w: 250, h: 190 },
+            'tem_foto': { x: 1100, y: 150, title: 'Tem foto?', subtitle: 'Rafael', w: 250, h: 190 },
+            'produz_cracha_1': { x: 1450, y: 150, title: 'Produz o crachá', subtitle: 'Vitória', conclusion: true, w: 250, h: 190 },
+            'retornar': { x: 450, y: 400, title: 'Retornar a Obra', subtitle: 'João', w: 250, h: 190 },
+            'rh_conferir': { x: 1100, y: 400, title: 'RH conferir na rede', subtitle: 'RH', w: 250, h: 190 },
+            'solicita_fotos': { x: 1450, y: 400, title: 'Solicita a Obra as fotos', subtitle: 'João', w: 250, h: 190 },
+            'obra_envia': { x: 450, y: 650, title: 'Obra envia para o RH', subtitle: 'OBRA', w: 250, h: 190 },
+            'envia_rh_2': { x: 1450, y: 650, title: 'Envia a RH', subtitle: 'OBRA', w: 250, h: 190 },
+            'rh_atualiza': { x: 450, y: 900, title: 'RH atualiza o RM', subtitle: 'RH', w: 250, h: 190 },
+            'ti_manda': { x: 800, y: 900, title: 'TI manda relação atualizada', subtitle: 'TI', w: 250, h: 190 },
+            'frota_1': { x: 1100, y: 900, title: 'Frota', subtitle: 'Rafael', w: 250, h: 190 },
+            'atualiza_rm_2': { x: 1450, y: 900, title: 'Atualiza RM', subtitle: 'RH', w: 250, h: 190 },
+            'ti_envia_2': { x: 1450, y: 1150, title: 'TI envia relação', subtitle: 'TI', w: 250, h: 190 },
+            'frota_2': { x: 1450, y: 1400, title: 'Frota', subtitle: 'Rafael', w: 250, h: 190 },
+            'produz_cracha_2': { x: 1450, y: 1650, title: 'Produz Crachá', subtitle: 'Vitória', conclusion: true, w: 250, h: 190 }
+        };
+
+        const defaultEdges = [
+            { id: 'e1', from: 'relacao', to: 'confrontar', exit: 'right-2', enter: 'left-2' },
+            { id: 'e2', from: 'confrontar', to: 'tem_foto', exit: 'right-2', enter: 'left-2', label: 'Inclui' },
+            { id: 'e3', from: 'confrontar', to: 'retornar', exit: 'bottom-2', enter: 'top-2', label: 'Não inclui' },
+            { id: 'e4', from: 'tem_foto', to: 'produz_cracha_1', exit: 'right-2', enter: 'left-2', label: 'Sim' },
+            { id: 'e5', from: 'tem_foto', to: 'rh_conferir', exit: 'bottom-2', enter: 'top-2', label: 'Não' },
+            { id: 'e6', from: 'rh_conferir', to: 'solicita_fotos', exit: 'right-2', enter: 'left-2', label: 'Não' },
+            { id: 'e7', from: 'solicita_fotos', to: 'envia_rh_2', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e8', from: 'envia_rh_2', to: 'atualiza_rm_2', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e9', from: 'rh_conferir', to: 'atualiza_rm_2', exit: 'bottom-2', enter: 'left-2', label: 'Sim' },
+            { id: 'e10', from: 'retornar', to: 'obra_envia', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e11', from: 'obra_envia', to: 'rh_atualiza', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e12', from: 'rh_atualiza', to: 'ti_manda', exit: 'right-2', enter: 'left-2' },
+            { id: 'e13', from: 'ti_manda', to: 'frota_1', exit: 'right-2', enter: 'left-2' },
+            { id: 'e14', from: 'frota_1', to: 'tem_foto', exit: 'top-2', enter: 'left-2' },
+            { id: 'e15', from: 'atualiza_rm_2', to: 'ti_envia_2', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e16', from: 'ti_envia_2', to: 'frota_2', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e17', from: 'frota_2', to: 'produz_cracha_2', exit: 'bottom-2', enter: 'top-2' }
+        ];
+
+        let works = [], nodes = defaultNodes, edges = defaultEdges;
+        let colorIndex = 0;
+        let isCloudLoaded = false;
+
+        // =========================================================
+        // 3. SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE ONSNAPSHOT)
+        // =========================================================
+        docRef.onSnapshot((doc) => {
+            if (doc.exists) {
+                const data = doc.data();
+                works = data.works || [];
+                nodes = data.nodes || defaultNodes;
+                edges = data.edges || defaultEdges;
+            } else {
+                saveData();
+            }
+            colorIndex = works.length;
+            
+            if(!isCloudLoaded) {
+                document.getElementById('cloud-loading').style.display = 'none';
+                isCloudLoaded = true;
+            }
+            
+            render();
+        }, (error) => {
+            console.error("Erro na nuvem: ", error);
+            alert("Atenção: Houve um problema a conectar à base de dados.");
+            document.getElementById('cloud-loading').style.display = 'none';
+            render();
+        });
+
+        // Função que envia dados para o banco na Nuvem
+        function saveData() {
+            docRef.set({ works: works, nodes: nodes, edges: edges }).catch(e => {
+                console.error("Erro ao guardar na nuvem: ", e);
+            });
+        }
+
+
+        // =========================================================
+        // RESTANTE DA LÓGICA (RENDERIZAÇÃO, ARRASTAR E LARGAR)
+        // =========================================================
+        const resizeObserver = new ResizeObserver(() => { requestAnimationFrame(drawEdges); });
+
+        function hardReset() {
+            if(confirm("ATENÇÃO: Isso vai apagar todas as obras na nuvem e restaurar o original. Deseja continuar?")) {
+                works = []; nodes = defaultNodes; edges = defaultEdges;
+                saveData();
+            }
+        }
+
+        function updateNodeText(id, field, value) { nodes[id][field] = value; saveData(); }
+
+        const anchorList = ['top-1', 'top-2', 'top-3', 'bottom-1', 'bottom-2', 'bottom-3', 'left-1', 'left-2', 'left-3', 'right-1', 'right-2', 'right-3'];
+
+        function render() {
+            const nodesContainer = document.getElementById('nodes-container');
+            nodesContainer.innerHTML = '';
+            resizeObserver.disconnect();
+            
+            for (const [id, node] of Object.entries(nodes)) {
+                const div = document.createElement('div');
+                div.className = `node ${node.conclusion ? 'node-conclusion' : ''}`; div.id = id;
+                div.style.left = (node.x || 0) + 'px'; div.style.top = (node.y || 0) + 'px';
+                div.style.width = (node.w || 250) + 'px'; div.style.minHeight = (node.h || 190) + 'px';
+                
+                div.ondragover = allowDrop; div.ondrop = (e) => drop(e, id);
+                div.ondragenter = dragEnter; div.ondragleave = dragLeave;
+
+                let anchorsHtml = anchorList.map(a => `<div class="anchor ${a}" onmousedown="startDrawEdge(event, '${id}', '${a}')"></div>`).join('');
+
+                div.innerHTML = `
+                    ${anchorsHtml}
+                    <div class="resize-handle" onmousedown="startNodeResize(event, '${id}')"></div>
+                    <div class="drag-handle" onmousedown="startNodeDrag(event, '${id}')">⠿ Mover</div>
+                    <div class="node-content">
+                        <div class="node-title" contenteditable="true" onblur="updateNodeText('${id}', 'title', this.innerText)">${node.title || ''}</div>
+                        <div class="node-subtitle" contenteditable="true" onblur="updateNodeText('${id}', 'subtitle', this.innerText)">${node.subtitle || ''}</div>
+                        <div class="works-container" id="container-${id}"></div>
+                    </div>
+                `;
+                nodesContainer.appendChild(div);
+                resizeObserver.observe(div);
+            }
+
+            works.forEach(work => {
+                const container = document.getElementById(`container-${work.node}`);
+                if (container) {
+                    const tag = document.createElement('div');
+                    tag.className = 'work-tag'; tag.style.backgroundColor = work.color;
+                    tag.draggable = true; tag.ondragstart = (e) => drag(e, work.id);
+                    tag.innerText = work.name;
+                    container.appendChild(tag);
+                }
+            });
+
+            setTimeout(drawEdges, 50);
+        }
+
+        let draggedWorkId = null; 
+
+        function drag(ev, workId) {
+            draggedWorkId = workId; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", "work"); 
+        }
+
+        function allowDrop(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; }
+        function dragEnter(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
+        function dragLeave(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
+        
+        function drop(ev, nodeId) {
+            ev.preventDefault(); 
+            if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
+            if (!draggedWorkId) return;
+            const work = works.find(w => w.id === draggedWorkId);
+            if (work && work.node !== nodeId) {
+                const path = findShortestPath(work.node, nodeId);
+                if (path) { path.shift(); work.history = work.history.concat(path); } else { work.history = findShortestPath('relacao', nodeId) || ['relacao']; }
+                work.node = nodeId; saveData(); 
+            }
+            draggedWorkId = null;
+        }
+
+        function dragEnterTrash(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
+        function dragLeaveTrash(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
+        function dropTrash(ev) {
+            ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
+            if (!draggedWorkId) return;
+            if(confirm("Excluir esta obra?")) { works = works.filter(w => w.id !== draggedWorkId); saveData(); }
+            draggedWorkId = null;
+        }
+
+        document.addEventListener('dragend', () => { draggedWorkId = null; });
+
+        function handleEnter(e) { if (e.key === 'Enter') addWork(); }
+        function addWork() {
+            const input = document.getElementById('newWorkInput');
+            const name = input.value.trim();
+            if (!name) return;
+            
+            const existingWork = works.find(w => w.name && w.name.toLowerCase() === name.toLowerCase());
+            let color = (existingWork && existingWork.color) ? existingWork.color : `hsl(${(colorIndex * 137.5) % 360}, 75%, 45%)`;
+            if(!existingWork) colorIndex++;
+
+            works.push({ id: 'w_' + Date.now().toString() + Math.random().toString(36).substring(2, 9), name: existingWork ? existingWork.name : name, color: color, node: 'relacao', history: ['relacao'] });
+            input.value = ''; saveData();
+        }
+
+        let drawingEdge = null; 
+
+        function startDrawEdge(e, nodeId, anchorId) {
+            e.stopPropagation(); drawingEdge = { fromNode: nodeId, fromAnchor: anchorId };
+            document.getElementById('canvas-container').style.cursor = 'crosshair';
+        }
+
+        window.addEventListener('mouseup', (e) => {
+            if (drawingEdge) {
+                let toAnchor = e.target.closest('.anchor');
+                if (toAnchor) {
+                    let toNodeId = toAnchor.closest('.node').id;
+                    let toAnchorId = Array.from(toAnchor.classList).find(c => c !== 'anchor');
+                    if (drawingEdge.fromNode !== toNodeId) {
+                        edges.push({ id: 'edge_' + Date.now(), from: drawingEdge.fromNode, to: toNodeId, exit: drawingEdge.fromAnchor, enter: toAnchorId, label: '' });
+                        saveData();
+                    }
+                }
+                drawingEdge = null;
+                document.getElementById('temp-line').setAttribute('d', '');
+                document.getElementById('canvas-container').style.cursor = 'grab';
+            }
+            if (isResizingNode) { isResizingNode = false; activeNode = null; saveData(); }
+            if (isDraggingNode) { isDraggingNode = false; activeNode = null; saveData(); }
+            if (isDraggingEdge) { isDraggingEdge = false; activeEdgeId = null; saveData(); }
+            if (isPanning) { isPanning = false; document.getElementById('canvas-container').style.cursor = 'grab'; }
+        });
+
+        let activeContextMenuEdgeId = null;
+        function showContextMenu(e, edgeId) {
+            e.preventDefault(); e.stopPropagation(); activeContextMenuEdgeId = edgeId;
+            const menu = document.getElementById('context-menu');
+            menu.style.display = 'flex'; menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+        }
+
+        function hideContextMenu() { document.getElementById('context-menu').style.display = 'none'; activeContextMenuEdgeId = null; }
+        document.addEventListener('click', hideContextMenu);
+        document.addEventListener('mousedown', (e) => { if(!e.target.closest('#context-menu')) hideContextMenu(); });
+
+        function contextEditEdge() {
+            if(!activeContextMenuEdgeId) return;
+            const edge = edges.find(e => e.id === activeContextMenuEdgeId);
+            if(edge) { const newLabel = prompt("Digite o texto da seta (deixe vazio para remover o texto):", edge.label || ""); if (newLabel !== null) { edge.label = newLabel.trim(); saveData(); } }
+            hideContextMenu();
+        }
+
+        function contextDeleteEdge() {
+            if(!activeContextMenuEdgeId) return;
+            if(confirm('Excluir esta seta?')) { edges = edges.filter(e => e.id !== activeContextMenuEdgeId); saveData(); }
+            hideContextMenu();
+        }
+
+        function drawEdges() {
+            const svg = document.getElementById('edges-svg');
+            const labelsContainer = document.getElementById('labels-container');
+            svg.innerHTML = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1 L 9 5 L 0 9 z" fill="var(--line-color)" /></marker></defs>`;
+            labelsContainer.innerHTML = '';
+
+            const edgeUsage = edges.map(() => []);
+            works.forEach(work => {
+                if (!work.history || work.history.length < 2) return;
+                for (let i = 0; i < work.history.length - 1; i++) {
+                    const fromNode = work.history[i], toNode = work.history[i+1];
+                    const edgeIndex = edges.findIndex(e => e.from === fromNode && e.to === toNode);
+                    if (edgeIndex !== -1) edgeUsage[edgeIndex].push(work.color);
+                }
+            });
+
+            edges.forEach((edge, index) => {
+                const fromEl = document.getElementById(edge.from), toEl = document.getElementById(edge.to);
+                if (!fromEl || !toEl) return;
+                const fromRect = { x: fromEl.offsetLeft, y: fromEl.offsetTop, w: fromEl.offsetWidth, h: fromEl.offsetHeight };
+                const toRect = { x: toEl.offsetLeft, y: toEl.offsetTop, w: toEl.offsetWidth, h: toEl.offsetHeight };
+
+                let rawPoints = getStrictOrthogonalPath(fromRect, toRect, edge);
+                let points = cleanPoints(rawPoints);
+                if(points.length === 0) return;
+
+                const basePath = createSVGPath(points, 'var(--line-color)', 4, true); svg.appendChild(basePath);
+
+                const hitboxPath = createSVGPath(points, 'transparent', 20, false);
+                hitboxPath.style.pointerEvents = 'stroke'; hitboxPath.style.cursor = 'context-menu';
+                hitboxPath.oncontextmenu = (e) => showContextMenu(e, edge.id); svg.appendChild(hitboxPath);
+
+                if (points.length >= 3) {
+                    const midIndex = Math.floor(points.length / 2); const c1 = points[midIndex - 1], c2 = points[midIndex];
+                    if (c1 && c2) {
+                        const cx = (c1.x + c2.x) / 2, cy = (c1.y + c2.y) / 2;
+                        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                        handle.setAttribute('cx', cx); handle.setAttribute('cy', cy); handle.setAttribute('r', 5); handle.setAttribute('class', 'edge-handle');
+                        handle.onmousedown = (e) => { e.stopPropagation(); isDraggingEdge = true; activeEdgeId = edge.id; document.getElementById('canvas-container').style.cursor = 'move'; };
+                        svg.appendChild(handle);
+                    }
+                }
+
+                if (edge.label && edge.label.trim() !== '') {
+                    const midPoint = getExactMidPoint(points);
+                    const labelDiv = document.createElement('div');
+                    labelDiv.className = 'edge-label'; labelDiv.innerText = edge.label;
+                    labelDiv.oncontextmenu = (e) => showContextMenu(e, edge.id);
+                    labelDiv.style.left = midPoint.x + 'px'; labelDiv.style.top = midPoint.y + 'px'; labelsContainer.appendChild(labelDiv);
+                }
+
+                const colors = edgeUsage[index];
+                colors.forEach((color, cIdx) => {
+                    const offsetPoints = applyOffset(points, (cIdx + 1) * 6);
+                    const finalColorPoints = extendEndpoints(offsetPoints, 18);
+                    const colorPath = createSVGPath(finalColorPoints, color, 3, false); svg.appendChild(colorPath);
+                });
+            });
+        }
+
+        function cleanPoints(points) {
+            if (!points || points.length === 0) return [];
+            let pts = points.filter((p, i) => i === 0 || p.x !== points[i-1].x || p.y !== points[i-1].y);
+            let i = 0;
+            while (i < pts.length - 2) {
+                let p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2];
+                if ((p1.x === p2.x && p2.x === p3.x) || (p1.y === p2.y && p2.y === p3.y)) pts.splice(i+1, 1); else i++;
+            }
+            return pts;
+        }
+
+        function extendEndpoints(points, amount) {
+            if (points.length < 2) return points;
+            let pts = points.map(p => ({...p})); 
+            let first = pts[0], second = pts[1];
+            if (first.x === second.x) { if (first.y < second.y) first.y -= amount; else first.y += amount; }
+            else if (first.y === second.y) { if (first.x < second.x) first.x -= amount; else first.x += amount; }
+            let last = pts[pts.length - 1], prev = pts[pts.length - 2];
+            if (last.x === prev.x) { if (prev.y < last.y) last.y += amount; else last.y -= amount; }
+            else if (last.y === prev.y) { if (prev.x < last.x) last.x += amount; else last.x -= amount; }
+            return pts;
+        }
+
+        function getStrictOrthogonalPath(r1, r2, edge) {
+            const getAnchorCoord = (rect, sideStr) => {
+                const [side, pos] = sideStr.split('-'); const ratio = pos === '1' ? 0.25 : pos === '2' ? 0.5 : 0.75;
+                if (side === 'top') return { x: Math.round(rect.x + rect.w * ratio), y: Math.round(rect.y) };
+                if (side === 'bottom') return { x: Math.round(rect.x + rect.w * ratio), y: Math.round(rect.y + rect.h) };
+                if (side === 'left') return { x: Math.round(rect.x), y: Math.round(rect.y + rect.h * ratio) };
+                if (side === 'right') return { x: Math.round(rect.x + rect.w), y: Math.round(rect.y + rect.h * ratio) };
+                return { x: rect.x, y: rect.y }; 
+            };
+            const p1 = getAnchorCoord(r1, edge.exit || 'right-2'), p2 = getAnchorCoord(r2, edge.enter || 'left-2');
+            const exitSide = (edge.exit || 'right-2').split('-')[0], enterSide = (edge.enter || 'left-2').split('-')[0], offset = 30;
+
+            if (edge.customMid === undefined) {
+                if (exitSide === 'right' && enterSide === 'left' && Math.abs(p1.y - p2.y) < 10) { p2.y = p1.y; if (p1.x <= p2.x) return [p1, p2]; }
+                if (exitSide === 'bottom' && enterSide === 'top' && Math.abs(p1.x - p2.x) < 10) { p2.x = p1.x; if (p1.y <= p2.y) return [p1, p2]; }
+            }
+
+            let outP = { ...p1 }, inP = { ...p2 };
+            if (exitSide === 'right') outP.x += offset; if (exitSide === 'left') outP.x -= offset;
+            if (exitSide === 'top') outP.y -= offset; if (exitSide === 'bottom') outP.y += offset;
+            if (enterSide === 'right') inP.x += offset; if (enterSide === 'left') inP.x -= offset;
+            if (enterSide === 'top') inP.y -= offset; if (enterSide === 'bottom') inP.y += offset;
+
+            const isExitH = exitSide === 'right' || exitSide === 'left', isEnterH = enterSide === 'right' || enterSide === 'left';
+            if (isExitH && isEnterH) {
+                const midX = edge.customMid !== undefined ? edge.customMid : (exitSide === enterSide ? (exitSide === 'right' ? Math.max(outP.x, inP.x) + offset : Math.min(outP.x, inP.x) - offset) : (outP.x + inP.x) / 2);
+                return [p1, outP, { x: midX, y: outP.y }, { x: midX, y: inP.y }, inP, p2];
+            } else if (!isExitH && !isEnterH) {
+                const midY = edge.customMid !== undefined ? edge.customMid : (exitSide === enterSide ? (exitSide === 'bottom' ? Math.max(outP.y, inP.y) + offset : Math.min(outP.y, inP.y) - offset) : (outP.y + inP.y) / 2);
+                return [p1, outP, { x: outP.x, y: midY }, { x: inP.x, y: midY }, inP, p2];
+            } else {
+                const midX = edge.customMid !== undefined ? edge.customMid : (outP.x + inP.x) / 2;
+                return [p1, outP, { x: midX, y: outP.y }, { x: midX, y: inP.y }, inP, p2];
+            }
+        }
+
+        function getExactMidPoint(points) {
+            let totalDist = 0; const segments = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const d = Math.hypot(points[i+1].x - points[i].x, points[i+1].y - points[i].y);
+                totalDist += d; segments.push({ d, p1: points[i], p2: points[i+1] });
+            }
+            let half = totalDist / 2;
+            for (let seg of segments) {
+                if (half <= seg.d) { const ratio = half / seg.d; return { x: seg.p1.x + (seg.p2.x - seg.p1.x) * ratio, y: seg.p1.y + (seg.p2.y - seg.p1.y) * ratio }; }
+                half -= seg.d;
+            }
+            return points[Math.floor(points.length / 2)] || {x:0, y:0};
+        }
+
+        function createSVGPath(points, color, width, isBase) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            if(!points || points.length === 0) return path;
+            let d = `M ${points[0].x} ${points[0].y}`;
+            for (let i = 1; i < points.length; i++) d += ` L ${points[i].x} ${points[i].y}`; 
+            path.setAttribute('d', d); path.setAttribute('stroke', color); path.setAttribute('stroke-width', width); path.setAttribute('fill', 'none'); path.setAttribute('stroke-linejoin', 'miter');
+            if (isBase) path.setAttribute('marker-end', 'url(#arrow)');
+            return path;
+        }
+
+        function applyOffset(points, offset) {
+            return points.map((curr, i) => {
+                const prev = i > 0 ? points[i-1] : null, next = i < points.length - 1 ? points[i+1] : null;
+                let finalDx = 0, finalDy = 0;
+                if (prev) {
+                    if (curr.x > prev.x) finalDy = offset; else if (curr.x < prev.x) finalDy = -offset;
+                    else if (curr.y > prev.y) finalDx = -offset; else if (curr.y < prev.y) finalDx = offset;
+                }
+                if (next) {
+                    if (next.x > curr.x) finalDy = offset; else if (next.x < curr.x) finalDy = -offset;
+                    else if (next.y > curr.y) finalDx = -offset; else if (next.y < curr.y) finalDx = offset;
+                }
+                return { x: curr.x + finalDx, y: curr.y + finalDy };
+            });
+        }
+
+        function findShortestPath(start, target) {
+            if (start === target) return [start];
+            let queue = [[start]]; let visited = new Set(); visited.add(start);
+            while (queue.length > 0) {
+                let path = queue.shift(); let node = path[path.length - 1];
+                let neighbors = edges.filter(e => e.from === node).map(e => e.to);
+                for (let neighbor of neighbors) {
+                    if (neighbor === target) return [...path, neighbor];
+                    if (!visited.has(neighbor)) { visited.add(neighbor); queue.push([...path, neighbor]); }
+                }
+            }
+            return null;
+        }
+
+        function exportData() {
+            const backup = { works, nodes, edges };
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
+            const anchor = document.createElement('a'); anchor.setAttribute("href", dataStr); anchor.setAttribute("download", "fluxograma_backup.json");
+            document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        }
+
+        let isPanning = false, startX = 0, startY = 0, panX = 100, panY = 100, scale = 0.8;
+        let isDraggingNode = false, activeNode = null;
+        let isDraggingEdge = false, activeEdgeId = null;
+        let isResizingNode = false, startW = 0, startH = 0;
+        let dragStartX = 0, dragStartY = 0, nodeStartX = 0, nodeStartY = 0;
+
+        document.getElementById('canvas-container').addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('.work-tag') || e.target.closest('button') || e.target.closest('input') || e.target.closest('.drag-handle') || e.target.closest('.resize-handle') || e.target.closest('[contenteditable="true"]') || e.target.closest('.edge-handle') || e.target.closest('.edge-label') || e.target.closest('.anchor')) return;
+            isPanning = true; startX = e.clientX - panX; startY = e.clientY - panY;
+            document.getElementById('canvas-container').style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (drawingEdge) {
+                const mouseX = (e.clientX - panX) / scale, mouseY = (e.clientY - panY) / scale;
+                const fromEl = document.getElementById(drawingEdge.fromNode);
+                if(fromEl) {
+                    const fromRect = { x: fromEl.offsetLeft, y: fromEl.offsetTop, w: fromEl.offsetWidth, h: fromEl.offsetHeight };
+                    const p1 = getStrictOrthogonalPath(fromRect, fromRect, { exit: drawingEdge.fromAnchor, enter: 'left-2' })[0];
+                    document.getElementById('temp-line').setAttribute('d', `M ${p1.x} ${p1.y} L ${mouseX} ${mouseY}`);
+                }
+                return;
+            }
+
+            if (isResizingNode && activeNode) {
+                nodes[activeNode].w = Math.max(180, startW + (e.clientX - dragStartX) / scale);
+                nodes[activeNode].h = Math.max(120, startH + (e.clientY - dragStartY) / scale);
+                document.getElementById(activeNode).style.width = nodes[activeNode].w + 'px';
+                document.getElementById(activeNode).style.minHeight = nodes[activeNode].h + 'px';
+                drawEdges(); return;
+            }
+
+            if (isDraggingNode && activeNode) {
+                nodes[activeNode].x = Math.round((nodeStartX + (e.clientX - dragStartX) / scale) / 50) * 50;
+                nodes[activeNode].y = Math.round((nodeStartY + (e.clientY - dragStartY) / scale) / 50) * 50;
+                document.getElementById(activeNode).style.left = nodes[activeNode].x + 'px';
+                document.getElementById(activeNode).style.top = nodes[activeNode].y + 'px';
+                drawEdges(); return;
+            }
+
+            if (isDraggingEdge && activeEdgeId) {
+                const edge = edges.find(ed => ed.id === activeEdgeId); if(!edge) return;
+                const mouseX = (e.clientX - panX) / scale, mouseY = (e.clientY - panY) / scale;
+                const isExitH = (edge.exit||'').includes('right') || (edge.exit||'').includes('left');
+                const isEnterH = (edge.enter||'').includes('right') || (edge.enter||'').includes('left');
+                if (isExitH && isEnterH) edge.customMid = Math.round(mouseX / 25) * 25;
+                else if (!isExitH && !isEnterH) edge.customMid = Math.round(mouseY / 25) * 25;
+                else edge.customMid = Math.round(mouseX / 25) * 25; 
+                drawEdges(); return;
+            }
+
+            if (isPanning) {
+                panX = e.clientX - startX; panY = e.clientY - startY;
+                document.getElementById('zoom-layer').style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+            }
+        });
+
+        function zoom(e) {
+            if (e.target.closest('#controls') || e.target.closest('#context-menu')) return;
+            e.preventDefault(); scale = Math.min(Math.max(0.3, scale + (-e.deltaY * 0.001)), 2);
+            document.getElementById('zoom-layer').style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        }
+
+        document.getElementById('zoom-layer').style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        window.addEventListener('resize', drawEdges);
+    </script>
+</body>
+</html>
