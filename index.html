@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-PT">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +13,7 @@
         :root {
             --bg-color: #f0f2f5; --text-color: #333333; --box-bg: #ffffff;
             --box-border: #cccccc; 
-            --line-color: #000000; /* Linha preta e robusta */
+            --line-color: #000000;
             --hover-color: #eaf4fb;
             --grid-color: rgba(0, 0, 0, 0.06); --drag-handle-bg: #f5f5f5; --drag-handle-text: #888888;
         }
@@ -28,7 +28,7 @@
         #controls {
             position: fixed; top: 0; left: 0; width: 100%; padding: 15px;
             background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid var(--box-border);
-            z-index: 1000; display: flex; gap: 15px; align-items: center;
+            z-index: 1000; display: flex; gap: 12px; align-items: center;
             box-shadow: 0 2px 5px rgba(0,0,0,0.05); flex-wrap: wrap;
         }
 
@@ -44,8 +44,6 @@
         button:hover { background: #005999; }
         .btn-success { background: #2b7a0b; }
         .btn-success:hover { background: #1e5c07; }
-        .btn-danger-outline { background: transparent; color: #cc0000; border: 1px solid #cc0000; }
-        .btn-danger-outline:hover { background: #ffe6e6; color: #990000; }
 
         #trash-zone {
             margin-left: auto; margin-right: 30px; padding: 10px 20px;
@@ -153,14 +151,17 @@
 
     <div id="cloud-loading">
         <div class="spinner"></div>
-        A sincronizar com a Nuvem...
+        Sincronizando com a Nuvem...
     </div>
 
     <div id="controls">
         <input type="text" id="newWorkInput" placeholder="Nome da nova obra..." onkeypress="handleEnter(event)">
         <button onclick="addWork()">Adicionar Obra</button>
-        <button onclick="exportData()" class="btn-success" style="margin-left: auto;">Descarregar Cópia</button>
-        <button onclick="hardReset()" class="btn-danger-outline" style="margin-left: 15px;">Repor Fluxo</button>
+        
+        <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(event)">
+        <button onclick="document.getElementById('importFile').click()" class="btn-success" style="margin-left: auto;">Importar Backup</button>
+        <button onclick="exportData()" class="btn-success">Baixar Backup</button>
+        
         <div id="trash-zone" ondragover="allowDrop(event)" ondrop="dropTrash(event)" ondragenter="dragEnterTrash(event)" ondragleave="dragLeaveTrash(event)">
             🗑️ Arraste a obra aqui p/ excluir
         </div>
@@ -198,7 +199,7 @@
         const docRef = db.collection("painel_obras").doc("dados_gerais");
 
         // =========================================================
-        // 2. DADOS PADRÃO E MIGRAÇÃO INTELIGENTE
+        // 2. DADOS PADRÃO
         // =========================================================
         const defaultNodes = {
             'relacao': { x: 100, y: 150, title: 'Relação atualizada', subtitle: 'OBRA', w: 250, h: 190 },
@@ -206,7 +207,6 @@
             'tem_foto': { x: 1100, y: 150, title: 'Tem foto?', subtitle: 'Rafael', w: 250, h: 190 },
             'produz_cracha_1': { x: 1450, y: 150, title: 'Produz o crachá', subtitle: 'Vitória', conclusion: false, w: 250, h: 190 },
             'concluido_1': { x: 1800, y: 150, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 },
-            
             'retornar': { x: 450, y: 400, title: 'Retornar a Obra', subtitle: 'João', w: 250, h: 190 },
             'rh_conferir': { x: 1100, y: 400, title: 'RH conferir na rede', subtitle: 'RH', w: 250, h: 190 },
             'solicita_fotos': { x: 1450, y: 400, title: 'Solicita a Obra as fotos', subtitle: 'João', w: 250, h: 190 },
@@ -248,7 +248,6 @@
         let colorIndex = 0;
         let isCloudLoaded = false;
 
-        // Função para garantir que os novos quadrados de Concluído sejam injetados em bancos antigos
         function checkMigration() {
             let modified = false;
             if (!nodes['concluido_1']) {
@@ -269,17 +268,6 @@
             }
             if (modified) saveData();
         }
-
-        // Tenta carregar Fallback Local em caso de lentidão
-        try {
-            const savedWorks = JSON.parse(localStorage.getItem('kanbanObras'));
-            if (Array.isArray(savedWorks)) works = savedWorks;
-            const savedNodes = JSON.parse(localStorage.getItem('kanbanNodes'));
-            if (savedNodes && typeof savedNodes === 'object' && Object.keys(savedNodes).length > 0) nodes = savedNodes;
-            const savedEdges = JSON.parse(localStorage.getItem('kanbanEdges'));
-            if (Array.isArray(savedEdges) && savedEdges.length > 0) edges = savedEdges;
-            checkMigration();
-        } catch(e) {}
 
         // =========================================================
         // 3. SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE)
@@ -312,13 +300,6 @@
         }
 
         const resizeObserver = new ResizeObserver(() => { requestAnimationFrame(drawEdges); });
-
-        function hardReset() {
-            if(confirm("ATENÇÃO: Isso vai apagar todas as obras na nuvem e restaurar o original. Deseja continuar?")) {
-                works = []; nodes = defaultNodes; edges = defaultEdges;
-                saveData();
-            }
-        }
 
         function updateNodeText(id, field, value) { nodes[id][field] = value; saveData(); }
 
@@ -369,7 +350,7 @@
         }
 
         // =========================================================
-        // DRAG E DROP DE OBRAS (TEXT/PLAIN)
+        // DRAG E DROP DE OBRAS
         // =========================================================
         let draggedWorkId = null; 
 
@@ -420,7 +401,7 @@
         }
 
         // =========================================================
-        // MOTOR GLOBAL DE INTERAÇÃO (CAIXAS, SETAS E PAN)
+        // MOTOR GLOBAL DE INTERAÇÃO
         // =========================================================
         let isPanning = false, startX = 0, startY = 0, panX = 100, panY = 100, scale = 0.8;
         let isDraggingNode = false, activeNode = null;
@@ -564,12 +545,11 @@
             hideContextMenu();
         }
 
-        /* ==== LÓGICA DE DESENHO E OCULTAÇÃO DE LINHAS ==== */
+        /* ==== LÓGICA DE DESENHO DE SETAS E LIMPEZA VISUAL ==== */
         function drawEdges() {
             const svg = document.getElementById('edges-svg');
             const labelsContainer = document.getElementById('labels-container');
             
-            // Seta da linha adaptada para a nova espessura 6
             svg.innerHTML = `
                 <defs>
                     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
@@ -583,8 +563,7 @@
             works.forEach(work => {
                 const currentNode = nodes[work.node];
                 
-                // === LÓGICA DE LIMPEZA VISUAL (OCULTAR LINHAS EM CONCLUÍDO) ===
-                // Se a obra está num quadrado marcado como "conclusion: true" ou com o título "Concluído", suas linhas são ocultadas.
+                // Ocultar histórico de linhas das obras que já foram finalizadas
                 if (currentNode && (currentNode.conclusion === true || /^conclu[íi]do$/i.test((currentNode.title || '').trim()))) {
                     return; 
                 }
@@ -607,10 +586,8 @@
                 let points = cleanPoints(rawPoints);
                 if(points.length === 0) return;
 
-                // Base PRETA E MAIS GROSSA (stroke-width: 6)
                 const basePath = createSVGPath(points, 'var(--line-color)', 6, true); svg.appendChild(basePath);
 
-                // Hitbox invisível maior para facilitar abrir o menu de contexto na linha mais grossa
                 const hitboxPath = createSVGPath(points, 'transparent', 24, false);
                 hitboxPath.style.pointerEvents = 'stroke'; hitboxPath.style.cursor = 'context-menu';
                 hitboxPath.oncontextmenu = (e) => showContextMenu(e, edge.id); svg.appendChild(hitboxPath);
@@ -634,7 +611,6 @@
                     labelDiv.style.left = midPoint.x + 'px'; labelDiv.style.top = midPoint.y + 'px'; labelsContainer.appendChild(labelDiv);
                 }
 
-                // Linhas coloridas (Adaptadas para a nova grossura da base)
                 const colors = edgeUsage[index];
                 colors.forEach((color, cIdx) => {
                     const offsetPoints = applyOffset(points, (cIdx + 1) * 7);
@@ -757,6 +733,9 @@
             return null;
         }
 
+        // =========================================================
+        // EXPORTAÇÃO E IMPORTAÇÃO DE BACKUP
+        // =========================================================
         function exportData() {
             const backup = { works, nodes, edges };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
@@ -771,12 +750,22 @@
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
-                    if (data.works && data.nodes) { works = data.works; nodes = data.nodes; edges = data.edges || defaultEdges; } 
-                    else { works = data; }
-                    colorIndex = works.length; saveData(); render();
-                } catch(err) { alert("Erro ao ler o arquivo JSON."); }
+                    if (data.nodes && data.edges) {
+                        works = data.works || [];
+                        nodes = data.nodes;
+                        edges = data.edges;
+                        colorIndex = works.length;
+                        saveData();
+                        render();
+                    } else {
+                        alert("Arquivo de backup inválido.");
+                    }
+                } catch(err) {
+                    alert("Erro ao ler o arquivo JSON.");
+                }
             };
-            reader.readAsText(file); event.target.value = '';
+            reader.readAsText(file);
+            event.target.value = '';
         }
     </script>
 </body>
