@@ -12,7 +12,9 @@
     <style>
         :root {
             --bg-color: #f0f2f5; --text-color: #333333; --box-bg: #ffffff;
-            --box-border: #cccccc; --line-color: #888888; --hover-color: #eaf4fb;
+            --box-border: #cccccc; 
+            --line-color: #000000; /* Linha preta e robusta */
+            --hover-color: #eaf4fb;
             --grid-color: rgba(0, 0, 0, 0.06); --drag-handle-bg: #f5f5f5; --drag-handle-text: #888888;
         }
 
@@ -180,7 +182,7 @@
 
     <script>
         // =========================================================
-        // 1. CONFIGURAÇÃO DO FIREBASE COM AS SUAS CHAVES
+        // 1. CONFIGURAÇÃO DO FIREBASE
         // =========================================================
         const firebaseConfig = {
             apiKey: "AIzaSyDd_6ll6MjQ8bk9wk4I_oxSGuGp9-DwT5Y",
@@ -196,13 +198,15 @@
         const docRef = db.collection("painel_obras").doc("dados_gerais");
 
         // =========================================================
-        // 2. DADOS PADRÃO (Caso o banco de dados esteja vazio)
+        // 2. DADOS PADRÃO E MIGRAÇÃO INTELIGENTE
         // =========================================================
         const defaultNodes = {
             'relacao': { x: 100, y: 150, title: 'Relação atualizada', subtitle: 'OBRA', w: 250, h: 190 },
             'confrontar': { x: 450, y: 150, title: 'Confrontar a relação...', subtitle: 'Rafael', w: 250, h: 190 },
             'tem_foto': { x: 1100, y: 150, title: 'Tem foto?', subtitle: 'Rafael', w: 250, h: 190 },
-            'produz_cracha_1': { x: 1450, y: 150, title: 'Produz o crachá', subtitle: 'Vitória', conclusion: true, w: 250, h: 190 },
+            'produz_cracha_1': { x: 1450, y: 150, title: 'Produz o crachá', subtitle: 'Vitória', conclusion: false, w: 250, h: 190 },
+            'concluido_1': { x: 1800, y: 150, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 },
+            
             'retornar': { x: 450, y: 400, title: 'Retornar a Obra', subtitle: 'João', w: 250, h: 190 },
             'rh_conferir': { x: 1100, y: 400, title: 'RH conferir na rede', subtitle: 'RH', w: 250, h: 190 },
             'solicita_fotos': { x: 1450, y: 400, title: 'Solicita a Obra as fotos', subtitle: 'João', w: 250, h: 190 },
@@ -214,7 +218,8 @@
             'atualiza_rm_2': { x: 1450, y: 900, title: 'Atualiza RM', subtitle: 'RH', w: 250, h: 190 },
             'ti_envia_2': { x: 1450, y: 1150, title: 'TI envia relação', subtitle: 'TI', w: 250, h: 190 },
             'frota_2': { x: 1450, y: 1400, title: 'Frota', subtitle: 'Rafael', w: 250, h: 190 },
-            'produz_cracha_2': { x: 1450, y: 1650, title: 'Produz Crachá', subtitle: 'Vitória', conclusion: true, w: 250, h: 190 }
+            'produz_cracha_2': { x: 1450, y: 1650, title: 'Produz Crachá', subtitle: 'Vitória', conclusion: false, w: 250, h: 190 },
+            'concluido_2': { x: 1800, y: 1650, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 }
         };
 
         const defaultEdges = [
@@ -234,12 +239,47 @@
             { id: 'e14', from: 'frota_1', to: 'tem_foto', exit: 'top-2', enter: 'left-2' },
             { id: 'e15', from: 'atualiza_rm_2', to: 'ti_envia_2', exit: 'bottom-2', enter: 'top-2' },
             { id: 'e16', from: 'ti_envia_2', to: 'frota_2', exit: 'bottom-2', enter: 'top-2' },
-            { id: 'e17', from: 'frota_2', to: 'produz_cracha_2', exit: 'bottom-2', enter: 'top-2' }
+            { id: 'e17', from: 'frota_2', to: 'produz_cracha_2', exit: 'bottom-2', enter: 'top-2' },
+            { id: 'e18', from: 'produz_cracha_1', to: 'concluido_1', exit: 'right-2', enter: 'left-2' },
+            { id: 'e19', from: 'produz_cracha_2', to: 'concluido_2', exit: 'right-2', enter: 'left-2' }
         ];
 
         let works = [], nodes = defaultNodes, edges = defaultEdges;
         let colorIndex = 0;
         let isCloudLoaded = false;
+
+        // Função para garantir que os novos quadrados de Concluído sejam injetados em bancos antigos
+        function checkMigration() {
+            let modified = false;
+            if (!nodes['concluido_1']) {
+                nodes['concluido_1'] = { x: 1800, y: 150, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 };
+                if (nodes['produz_cracha_1']) nodes['produz_cracha_1'].conclusion = false;
+                if (!edges.find(e => e.from === 'produz_cracha_1' && e.to === 'concluido_1')) {
+                    edges.push({ id: 'edge_mig_1', from: 'produz_cracha_1', to: 'concluido_1', exit: 'right-2', enter: 'left-2', label: '' });
+                }
+                modified = true;
+            }
+            if (!nodes['concluido_2']) {
+                nodes['concluido_2'] = { x: 1800, y: 1650, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 };
+                if (nodes['produz_cracha_2']) nodes['produz_cracha_2'].conclusion = false;
+                if (!edges.find(e => e.from === 'produz_cracha_2' && e.to === 'concluido_2')) {
+                    edges.push({ id: 'edge_mig_2', from: 'produz_cracha_2', to: 'concluido_2', exit: 'right-2', enter: 'left-2', label: '' });
+                }
+                modified = true;
+            }
+            if (modified) saveData();
+        }
+
+        // Tenta carregar Fallback Local em caso de lentidão
+        try {
+            const savedWorks = JSON.parse(localStorage.getItem('kanbanObras'));
+            if (Array.isArray(savedWorks)) works = savedWorks;
+            const savedNodes = JSON.parse(localStorage.getItem('kanbanNodes'));
+            if (savedNodes && typeof savedNodes === 'object' && Object.keys(savedNodes).length > 0) nodes = savedNodes;
+            const savedEdges = JSON.parse(localStorage.getItem('kanbanEdges'));
+            if (Array.isArray(savedEdges) && savedEdges.length > 0) edges = savedEdges;
+            checkMigration();
+        } catch(e) {}
 
         // =========================================================
         // 3. SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE)
@@ -253,6 +293,7 @@
             } else {
                 saveData();
             }
+            checkMigration();
             colorIndex = works.length;
             
             if(!isCloudLoaded) {
@@ -276,7 +317,6 @@
             if(confirm("ATENÇÃO: Isso vai apagar todas as obras na nuvem e restaurar o original. Deseja continuar?")) {
                 works = []; nodes = defaultNodes; edges = defaultEdges;
                 saveData();
-                render();
             }
         }
 
@@ -329,64 +369,43 @@
         }
 
         // =========================================================
-        // DRAG & DROP INFALÍVEL COM DATATRANSFER "TEXT/PLAIN"
+        // DRAG E DROP DE OBRAS (TEXT/PLAIN)
         // =========================================================
+        let draggedWorkId = null; 
+
         function drag(ev, workId) {
-            ev.dataTransfer.effectAllowed = "move"; 
-            ev.dataTransfer.setData("text/plain", workId); 
+            draggedWorkId = workId; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", "work"); 
         }
 
         function allowDrop(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; }
-        
-        function dragEnter(ev) { 
-            ev.preventDefault(); 
-            if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); 
-        }
-        
-        function dragLeave(ev) { 
-            if(ev.currentTarget.classList && !ev.currentTarget.contains(ev.relatedTarget)) {
-                ev.currentTarget.classList.remove('drag-over'); 
-            }
-        }
+        function dragEnter(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
+        function dragLeave(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
         
         function drop(ev, nodeId) {
             ev.preventDefault(); 
             if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
-            
-            const workId = ev.dataTransfer.getData("text/plain");
-            if (!workId) return;
-
-            const work = works.find(w => w.id === workId);
+            if (!draggedWorkId) return;
+            const work = works.find(w => w.id === draggedWorkId);
             if (work && work.node !== nodeId) {
                 const path = findShortestPath(work.node, nodeId);
                 if (path) { path.shift(); work.history = work.history.concat(path); } else { work.history = findShortestPath('relacao', nodeId) || ['relacao']; }
-                work.node = nodeId; 
-                saveData(); 
-                render(); 
+                work.node = nodeId; saveData(); 
             }
+            draggedWorkId = null;
         }
 
         function dragEnterTrash(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
         function dragLeaveTrash(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
-        
         function dropTrash(ev) {
             ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
-            
-            const workId = ev.dataTransfer.getData("text/plain");
-            if (!workId) return;
-
-            if(confirm("Excluir esta obra?")) { 
-                works = works.filter(w => w.id !== workId); 
-                saveData(); 
-                render(); 
-            }
+            if (!draggedWorkId) return;
+            if(confirm("Excluir esta obra?")) { works = works.filter(w => w.id !== draggedWorkId); saveData(); }
+            draggedWorkId = null;
         }
 
-        // =========================================================
-        // CRIAÇÃO DE OBRAS
-        // =========================================================
+        document.addEventListener('dragend', () => { draggedWorkId = null; });
+
         function handleEnter(e) { if (e.key === 'Enter') addWork(); }
-        
         function addWork() {
             const input = document.getElementById('newWorkInput');
             const name = input.value.trim();
@@ -397,13 +416,11 @@
             if(!existingWork) colorIndex++;
 
             works.push({ id: 'w_' + Date.now().toString() + Math.random().toString(36).substring(2, 9), name: existingWork ? existingWork.name : name, color: color, node: 'relacao', history: ['relacao'] });
-            input.value = ''; 
-            saveData(); 
-            render(); 
+            input.value = ''; saveData();
         }
 
         // =========================================================
-        // MOTOR GLOBAL DE INTERAÇÃO (PAN, MOVER CAIXA, RESIZE)
+        // MOTOR GLOBAL DE INTERAÇÃO (CAIXAS, SETAS E PAN)
         // =========================================================
         let isPanning = false, startX = 0, startY = 0, panX = 100, panY = 100, scale = 0.8;
         let isDraggingNode = false, activeNode = null;
@@ -420,8 +437,7 @@
         });
 
         function startNodeDrag(e, id) {
-            if(e.button !== 0) return; 
-            e.stopPropagation(); 
+            if(e.button !== 0) return; e.stopPropagation(); 
             isDraggingNode = true; activeNode = id;
             dragStartX = e.clientX; dragStartY = e.clientY;
             nodeStartX = nodes[id].x || 0; nodeStartY = nodes[id].y || 0;
@@ -429,8 +445,7 @@
         }
 
         function startNodeResize(e, id) {
-            if(e.button !== 0) return; 
-            e.stopPropagation(); 
+            if(e.button !== 0) return; e.stopPropagation(); 
             isResizingNode = true; activeNode = id;
             dragStartX = e.clientX; dragStartY = e.clientY;
             startW = nodes[id].w || 250; startH = nodes[id].h || 190;
@@ -438,15 +453,13 @@
         }
 
         function startEdgeDrag(e, id) { 
-            if(e.button !== 0) return; 
-            e.stopPropagation(); 
+            if(e.button !== 0) return; e.stopPropagation(); 
             isDraggingEdge = true; activeEdgeId = id; 
             document.getElementById('canvas-container').style.cursor = 'move'; 
         }
 
         function startDrawEdge(e, nodeId, anchorId) {
-            if(e.button !== 0) return; 
-            e.stopPropagation(); 
+            if(e.button !== 0) return; e.stopPropagation(); 
             drawingEdge = { fromNode: nodeId, fromAnchor: anchorId };
             document.getElementById('canvas-container').style.cursor = 'crosshair';
         }
@@ -473,23 +486,21 @@
 
             if (isDraggingNode && activeNode) {
                 const dx = (e.clientX - dragStartX) / scale, dy = (e.clientY - dragStartY) / scale;
-                const gridSize = 50;
-                nodes[activeNode].x = Math.round((nodeStartX + dx) / gridSize) * gridSize;
-                nodes[activeNode].y = Math.round((nodeStartY + dy) / gridSize) * gridSize;
+                nodes[activeNode].x = Math.round((nodeStartX + dx) / 50) * 50;
+                nodes[activeNode].y = Math.round((nodeStartY + dy) / 50) * 50;
                 const el = document.getElementById(activeNode);
                 if(el) { el.style.left = nodes[activeNode].x + 'px'; el.style.top = nodes[activeNode].y + 'px'; }
                 drawEdges(); return;
             }
 
             if (isDraggingEdge && activeEdgeId) {
-                const mouseX = (e.clientX - panX) / scale, mouseY = (e.clientY - panY) / scale;
                 const edge = edges.find(ed => ed.id === activeEdgeId); if(!edge) return;
+                const mouseX = (e.clientX - panX) / scale, mouseY = (e.clientY - panY) / scale;
                 const isExitH = (edge.exit||'').includes('right') || (edge.exit||'').includes('left');
                 const isEnterH = (edge.enter||'').includes('right') || (edge.enter||'').includes('left');
-                const gridSize = 25; 
-                if (isExitH && isEnterH) edge.customMid = Math.round(mouseX / gridSize) * gridSize;
-                else if (!isExitH && !isEnterH) edge.customMid = Math.round(mouseY / gridSize) * gridSize;
-                else edge.customMid = Math.round(mouseX / gridSize) * gridSize; 
+                if (isExitH && isEnterH) edge.customMid = Math.round(mouseX / 25) * 25;
+                else if (!isExitH && !isEnterH) edge.customMid = Math.round(mouseY / 25) * 25;
+                else edge.customMid = Math.round(mouseX / 25) * 25; 
                 drawEdges(); return;
             }
 
@@ -514,9 +525,9 @@
                 document.getElementById('temp-line').setAttribute('d', '');
                 document.getElementById('canvas-container').style.cursor = 'grab';
             }
-            if (isResizingNode) { isResizingNode = false; activeNode = null; saveData(); render(); }
-            if (isDraggingNode) { isDraggingNode = false; activeNode = null; saveData(); render(); }
-            if (isDraggingEdge) { isDraggingEdge = false; activeEdgeId = null; saveData(); render(); }
+            if (isResizingNode) { isResizingNode = false; activeNode = null; saveData(); }
+            if (isDraggingNode) { isDraggingNode = false; activeNode = null; saveData(); }
+            if (isDraggingEdge) { isDraggingEdge = false; activeEdgeId = null; saveData(); }
             if (isPanning) { isPanning = false; document.getElementById('canvas-container').style.cursor = 'grab'; }
         });
 
@@ -553,15 +564,31 @@
             hideContextMenu();
         }
 
-        /* ==== LÓGICA DE DESENHO DE SETAS ==== */
+        /* ==== LÓGICA DE DESENHO E OCULTAÇÃO DE LINHAS ==== */
         function drawEdges() {
             const svg = document.getElementById('edges-svg');
             const labelsContainer = document.getElementById('labels-container');
-            svg.innerHTML = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1 L 9 5 L 0 9 z" fill="var(--line-color)" /></marker></defs>`;
+            
+            // Seta da linha adaptada para a nova espessura 6
+            svg.innerHTML = `
+                <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+                        <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--line-color)" />
+                    </marker>
+                </defs>
+            `;
             labelsContainer.innerHTML = '';
 
             const edgeUsage = edges.map(() => []);
             works.forEach(work => {
+                const currentNode = nodes[work.node];
+                
+                // === LÓGICA DE LIMPEZA VISUAL (OCULTAR LINHAS EM CONCLUÍDO) ===
+                // Se a obra está num quadrado marcado como "conclusion: true" ou com o título "Concluído", suas linhas são ocultadas.
+                if (currentNode && (currentNode.conclusion === true || /^conclu[íi]do$/i.test((currentNode.title || '').trim()))) {
+                    return; 
+                }
+
                 if (!work.history || work.history.length < 2) return;
                 for (let i = 0; i < work.history.length - 1; i++) {
                     const fromNode = work.history[i], toNode = work.history[i+1];
@@ -580,9 +607,11 @@
                 let points = cleanPoints(rawPoints);
                 if(points.length === 0) return;
 
-                const basePath = createSVGPath(points, 'var(--line-color)', 4, true); svg.appendChild(basePath);
+                // Base PRETA E MAIS GROSSA (stroke-width: 6)
+                const basePath = createSVGPath(points, 'var(--line-color)', 6, true); svg.appendChild(basePath);
 
-                const hitboxPath = createSVGPath(points, 'transparent', 20, false);
+                // Hitbox invisível maior para facilitar abrir o menu de contexto na linha mais grossa
+                const hitboxPath = createSVGPath(points, 'transparent', 24, false);
                 hitboxPath.style.pointerEvents = 'stroke'; hitboxPath.style.cursor = 'context-menu';
                 hitboxPath.oncontextmenu = (e) => showContextMenu(e, edge.id); svg.appendChild(hitboxPath);
 
@@ -591,7 +620,7 @@
                     if (c1 && c2) {
                         const cx = (c1.x + c2.x) / 2, cy = (c1.y + c2.y) / 2;
                         const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                        handle.setAttribute('cx', cx); handle.setAttribute('cy', cy); handle.setAttribute('r', 5); handle.setAttribute('class', 'edge-handle');
+                        handle.setAttribute('cx', cx); handle.setAttribute('cy', cy); handle.setAttribute('r', 6); handle.setAttribute('class', 'edge-handle');
                         handle.onmousedown = (e) => { e.stopPropagation(); isDraggingEdge = true; activeEdgeId = edge.id; document.getElementById('canvas-container').style.cursor = 'move'; };
                         svg.appendChild(handle);
                     }
@@ -605,9 +634,10 @@
                     labelDiv.style.left = midPoint.x + 'px'; labelDiv.style.top = midPoint.y + 'px'; labelsContainer.appendChild(labelDiv);
                 }
 
+                // Linhas coloridas (Adaptadas para a nova grossura da base)
                 const colors = edgeUsage[index];
                 colors.forEach((color, cIdx) => {
-                    const offsetPoints = applyOffset(points, (cIdx + 1) * 6);
+                    const offsetPoints = applyOffset(points, (cIdx + 1) * 7);
                     const finalColorPoints = extendEndpoints(offsetPoints, 18);
                     const colorPath = createSVGPath(finalColorPoints, color, 3, false); svg.appendChild(colorPath);
                 });
