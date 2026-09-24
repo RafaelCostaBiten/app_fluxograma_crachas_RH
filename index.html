@@ -52,9 +52,9 @@
         }
         #trash-zone.drag-over { background: rgba(204, 0, 0, 0.1); transform: scale(1.05); }
 
-        /* Container ajustado para o Panning Global */
         #canvas-container { width: 100%; height: 100%; cursor: grab; position: relative; }
-        
+        #canvas-container:active { cursor: grabbing; }
+
         #zoom-layer {
             position: absolute; transform-origin: 0 0; width: 6000px; height: 6000px;
             background-size: 50px 50px;
@@ -169,7 +169,6 @@
         <div class="context-menu-item danger" onclick="contextDeleteEdge()">🗑️ Excluir Seta</div>
     </div>
 
-    <!-- Removidos os onmousemove e onmousedown daqui para usar os Listeners Globais Infalíveis -->
     <div id="canvas-container" onwheel="zoom(event)">
         <div id="zoom-layer">
             <svg id="edges-svg"></svg>
@@ -181,7 +180,7 @@
 
     <script>
         // =========================================================
-        // 1. CONFIGURAÇÃO DO FIREBASE 
+        // 1. CONFIGURAÇÃO DO FIREBASE COM AS SUAS CHAVES
         // =========================================================
         const firebaseConfig = {
             apiKey: "AIzaSyDd_6ll6MjQ8bk9wk4I_oxSGuGp9-DwT5Y",
@@ -197,7 +196,7 @@
         const docRef = db.collection("painel_obras").doc("dados_gerais");
 
         // =========================================================
-        // 2. DADOS PADRÃO
+        // 2. DADOS PADRÃO (Caso o banco de dados esteja vazio)
         // =========================================================
         const defaultNodes = {
             'relacao': { x: 100, y: 150, title: 'Relação atualizada', subtitle: 'OBRA', w: 250, h: 190 },
@@ -242,6 +241,9 @@
         let colorIndex = 0;
         let isCloudLoaded = false;
 
+        // =========================================================
+        // 3. SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE)
+        // =========================================================
         docRef.onSnapshot((doc) => {
             if (doc.exists) {
                 const data = doc.data();
@@ -274,6 +276,7 @@
             if(confirm("ATENÇÃO: Isso vai apagar todas as obras na nuvem e restaurar o original. Deseja continuar?")) {
                 works = []; nodes = defaultNodes; edges = defaultEdges;
                 saveData();
+                render();
             }
         }
 
@@ -326,43 +329,64 @@
         }
 
         // =========================================================
-        // DRAG & DROP DE OBRAS (À PROVA DE FALHAS)
+        // DRAG & DROP INFALÍVEL COM DATATRANSFER "TEXT/PLAIN"
         // =========================================================
-        let draggedWorkId = null; 
-
         function drag(ev, workId) {
-            draggedWorkId = workId; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", "work"); 
+            ev.dataTransfer.effectAllowed = "move"; 
+            ev.dataTransfer.setData("text/plain", workId); 
         }
 
         function allowDrop(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; }
-        function dragEnter(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
-        function dragLeave(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
+        
+        function dragEnter(ev) { 
+            ev.preventDefault(); 
+            if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); 
+        }
+        
+        function dragLeave(ev) { 
+            if(ev.currentTarget.classList && !ev.currentTarget.contains(ev.relatedTarget)) {
+                ev.currentTarget.classList.remove('drag-over'); 
+            }
+        }
         
         function drop(ev, nodeId) {
             ev.preventDefault(); 
             if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
-            if (!draggedWorkId) return;
-            const work = works.find(w => w.id === draggedWorkId);
+            
+            const workId = ev.dataTransfer.getData("text/plain");
+            if (!workId) return;
+
+            const work = works.find(w => w.id === workId);
             if (work && work.node !== nodeId) {
                 const path = findShortestPath(work.node, nodeId);
                 if (path) { path.shift(); work.history = work.history.concat(path); } else { work.history = findShortestPath('relacao', nodeId) || ['relacao']; }
-                work.node = nodeId; saveData(); 
+                work.node = nodeId; 
+                saveData(); 
+                render(); 
             }
-            draggedWorkId = null;
         }
 
         function dragEnterTrash(ev) { ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.add('drag-over'); }
         function dragLeaveTrash(ev) { if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over'); }
+        
         function dropTrash(ev) {
             ev.preventDefault(); if(ev.currentTarget.classList) ev.currentTarget.classList.remove('drag-over');
-            if (!draggedWorkId) return;
-            if(confirm("Excluir esta obra?")) { works = works.filter(w => w.id !== draggedWorkId); saveData(); }
-            draggedWorkId = null;
+            
+            const workId = ev.dataTransfer.getData("text/plain");
+            if (!workId) return;
+
+            if(confirm("Excluir esta obra?")) { 
+                works = works.filter(w => w.id !== workId); 
+                saveData(); 
+                render(); 
+            }
         }
 
-        document.addEventListener('dragend', () => { draggedWorkId = null; });
-
+        // =========================================================
+        // CRIAÇÃO DE OBRAS
+        // =========================================================
         function handleEnter(e) { if (e.key === 'Enter') addWork(); }
+        
         function addWork() {
             const input = document.getElementById('newWorkInput');
             const name = input.value.trim();
@@ -373,11 +397,13 @@
             if(!existingWork) colorIndex++;
 
             works.push({ id: 'w_' + Date.now().toString() + Math.random().toString(36).substring(2, 9), name: existingWork ? existingWork.name : name, color: color, node: 'relacao', history: ['relacao'] });
-            input.value = ''; saveData();
+            input.value = ''; 
+            saveData(); 
+            render(); 
         }
 
         // =========================================================
-        // MOTOR GLOBAL DE INTERAÇÃO (RESOLVE O PROBLEMA DE TRAVAR)
+        // MOTOR GLOBAL DE INTERAÇÃO (PAN, MOVER CAIXA, RESIZE)
         // =========================================================
         let isPanning = false, startX = 0, startY = 0, panX = 100, panY = 100, scale = 0.8;
         let isDraggingNode = false, activeNode = null;
@@ -386,17 +412,10 @@
         let dragStartX = 0, dragStartY = 0, nodeStartX = 0, nodeStartY = 0;
         let drawingEdge = null; 
 
-        // Início do Pan no Fundo do Canvas
         document.getElementById('canvas-container').addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
-            if (e.target.closest('.work-tag') || e.target.closest('button') || e.target.closest('input') || 
-                e.target.closest('.drag-handle') || e.target.closest('.resize-handle') || 
-                e.target.closest('[contenteditable="true"]') || e.target.closest('.edge-handle') || 
-                e.target.closest('.edge-label') || e.target.closest('.anchor')) return;
-                
-            isPanning = true; 
-            startX = e.clientX - panX; 
-            startY = e.clientY - panY;
+            if (e.target.closest('.work-tag') || e.target.closest('button') || e.target.closest('input') || e.target.closest('.drag-handle') || e.target.closest('.resize-handle') || e.target.closest('[contenteditable="true"]') || e.target.closest('.edge-handle') || e.target.closest('.edge-label') || e.target.closest('.anchor')) return;
+            isPanning = true; startX = e.clientX - panX; startY = e.clientY - panY;
             document.getElementById('canvas-container').style.cursor = 'grabbing';
         });
 
@@ -432,7 +451,6 @@
             document.getElementById('canvas-container').style.cursor = 'crosshair';
         }
 
-        // Listener Global de Movimento - O mouse nunca escapa
         window.addEventListener('mousemove', (e) => {
             if (drawingEdge) {
                 const mouseX = (e.clientX - panX) / scale, mouseY = (e.clientY - panY) / scale;
@@ -455,8 +473,9 @@
 
             if (isDraggingNode && activeNode) {
                 const dx = (e.clientX - dragStartX) / scale, dy = (e.clientY - dragStartY) / scale;
-                nodes[activeNode].x = Math.round((nodeStartX + dx) / 50) * 50;
-                nodes[activeNode].y = Math.round((nodeStartY + dy) / 50) * 50;
+                const gridSize = 50;
+                nodes[activeNode].x = Math.round((nodeStartX + dx) / gridSize) * gridSize;
+                nodes[activeNode].y = Math.round((nodeStartY + dy) / gridSize) * gridSize;
                 const el = document.getElementById(activeNode);
                 if(el) { el.style.left = nodes[activeNode].x + 'px'; el.style.top = nodes[activeNode].y + 'px'; }
                 drawEdges(); return;
@@ -467,9 +486,10 @@
                 const edge = edges.find(ed => ed.id === activeEdgeId); if(!edge) return;
                 const isExitH = (edge.exit||'').includes('right') || (edge.exit||'').includes('left');
                 const isEnterH = (edge.enter||'').includes('right') || (edge.enter||'').includes('left');
-                if (isExitH && isEnterH) edge.customMid = Math.round(mouseX / 25) * 25;
-                else if (!isExitH && !isEnterH) edge.customMid = Math.round(mouseY / 25) * 25;
-                else edge.customMid = Math.round(mouseX / 25) * 25; 
+                const gridSize = 25; 
+                if (isExitH && isEnterH) edge.customMid = Math.round(mouseX / gridSize) * gridSize;
+                else if (!isExitH && !isEnterH) edge.customMid = Math.round(mouseY / gridSize) * gridSize;
+                else edge.customMid = Math.round(mouseX / gridSize) * gridSize; 
                 drawEdges(); return;
             }
 
@@ -479,7 +499,6 @@
             }
         });
 
-        // Listener Global de Mouse Up - Encerra todas as ações
         window.addEventListener('mouseup', (e) => {
             if (drawingEdge) {
                 let toAnchor = e.target.closest('.anchor');
@@ -495,9 +514,9 @@
                 document.getElementById('temp-line').setAttribute('d', '');
                 document.getElementById('canvas-container').style.cursor = 'grab';
             }
-            if (isResizingNode) { isResizingNode = false; activeNode = null; saveData(); }
-            if (isDraggingNode) { isDraggingNode = false; activeNode = null; saveData(); }
-            if (isDraggingEdge) { isDraggingEdge = false; activeEdgeId = null; saveData(); }
+            if (isResizingNode) { isResizingNode = false; activeNode = null; saveData(); render(); }
+            if (isDraggingNode) { isDraggingNode = false; activeNode = null; saveData(); render(); }
+            if (isDraggingEdge) { isDraggingEdge = false; activeEdgeId = null; saveData(); render(); }
             if (isPanning) { isPanning = false; document.getElementById('canvas-container').style.cursor = 'grab'; }
         });
 
@@ -534,6 +553,7 @@
             hideContextMenu();
         }
 
+        /* ==== LÓGICA DE DESENHO DE SETAS ==== */
         function drawEdges() {
             const svg = document.getElementById('edges-svg');
             const labelsContainer = document.getElementById('labels-container');
@@ -691,6 +711,20 @@
                 }
                 return { x: curr.x + finalDx, y: curr.y + finalDy };
             });
+        }
+
+        function findShortestPath(start, target) {
+            if (start === target) return [start];
+            let queue = [[start]]; let visited = new Set(); visited.add(start);
+            while (queue.length > 0) {
+                let path = queue.shift(); let node = path[path.length - 1];
+                let neighbors = edges.filter(e => e.from === node).map(e => e.to);
+                for (let neighbor of neighbors) {
+                    if (neighbor === target) return [...path, neighbor];
+                    if (!visited.has(neighbor)) { visited.add(neighbor); queue.push([...path, neighbor]); }
+                }
+            }
+            return null;
         }
 
         function exportData() {
