@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acompanhamento de Obras - Cloud Sincronizado</title>
+    <title>Acompanhamento de Obras - Editor Interativo</title>
     
     <!-- Bibliotecas do Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.1.0/firebase-app-compat.js"></script>
@@ -12,9 +12,7 @@
     <style>
         :root {
             --bg-color: #f0f2f5; --text-color: #333333; --box-bg: #ffffff;
-            --box-border: #cccccc; 
-            --line-color: #000000;
-            --hover-color: #eaf4fb;
+            --box-border: #cccccc; --line-color: #000000; --hover-color: #eaf4fb;
             --grid-color: rgba(0, 0, 0, 0.06); --drag-handle-bg: #f5f5f5; --drag-handle-text: #888888;
         }
 
@@ -44,6 +42,8 @@
         button:hover { background: #005999; }
         .btn-success { background: #2b7a0b; }
         .btn-success:hover { background: #1e5c07; }
+        .btn-warning { background: #e67e22; }
+        .btn-warning:hover { background: #d35400; }
 
         #trash-zone {
             margin-left: auto; margin-right: 30px; padding: 10px 20px;
@@ -127,6 +127,7 @@
         .anchor.left-1 { top: 25%; left: 0; } .anchor.left-2 { top: 50%; left: 0; } .anchor.left-3 { top: 75%; left: 0; }
         .anchor.right-1 { top: 25%; left: 100%; } .anchor.right-2 { top: 50%; left: 100%; } .anchor.right-3 { top: 75%; left: 100%; }
 
+        /* Menu de Contexto (Botão Direito) Universal */
         #context-menu {
             position: fixed; background: white; border: 1px solid #ccc; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
             border-radius: 6px; padding: 5px 0; z-index: 10000; display: none; flex-direction: column; min-width: 160px; font-size: 13px;
@@ -151,12 +152,13 @@
 
     <div id="cloud-loading">
         <div class="spinner"></div>
-        Sincronizando com a Nuvem...
+        A sincronizar com a Nuvem...
     </div>
 
     <div id="controls">
         <input type="text" id="newWorkInput" placeholder="Nome da nova obra..." onkeypress="handleEnter(event)">
         <button onclick="addWork()">Adicionar Obra</button>
+        <button onclick="createNode()" class="btn-warning" style="margin-left: 15px;">+ Novo Processo</button>
         
         <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(event)">
         <button onclick="document.getElementById('importFile').click()" class="btn-success" style="margin-left: auto;">Importar Backup</button>
@@ -168,8 +170,7 @@
     </div>
 
     <div id="context-menu">
-        <div class="context-menu-item" onclick="contextEditEdge()">✏️ Editar Texto</div>
-        <div class="context-menu-item danger" onclick="contextDeleteEdge()">🗑️ Excluir Seta</div>
+        <!-- Itens inseridos dinamicamente via JS -->
     </div>
 
     <div id="canvas-container" onwheel="zoom(event)">
@@ -183,7 +184,7 @@
 
     <script>
         // =========================================================
-        // 1. CONFIGURAÇÃO DO FIREBASE
+        // 1. CONFIGURAÇÃO DO FIREBASE 
         // =========================================================
         const firebaseConfig = {
             apiKey: "AIzaSyDd_6ll6MjQ8bk9wk4I_oxSGuGp9-DwT5Y",
@@ -199,7 +200,7 @@
         const docRef = db.collection("painel_obras").doc("dados_gerais");
 
         // =========================================================
-        // 2. DADOS PADRÃO
+        // 2. DADOS PADRÃO E MIGRAÇÃO INTELIGENTE
         // =========================================================
         const defaultNodes = {
             'relacao': { x: 100, y: 150, title: 'Relação atualizada', subtitle: 'OBRA', w: 250, h: 190 },
@@ -207,6 +208,7 @@
             'tem_foto': { x: 1100, y: 150, title: 'Tem foto?', subtitle: 'Rafael', w: 250, h: 190 },
             'produz_cracha_1': { x: 1450, y: 150, title: 'Produz o crachá', subtitle: 'Vitória', conclusion: false, w: 250, h: 190 },
             'concluido_1': { x: 1800, y: 150, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 },
+            
             'retornar': { x: 450, y: 400, title: 'Retornar a Obra', subtitle: 'João', w: 250, h: 190 },
             'rh_conferir': { x: 1100, y: 400, title: 'RH conferir na rede', subtitle: 'RH', w: 250, h: 190 },
             'solicita_fotos': { x: 1450, y: 400, title: 'Solicita a Obra as fotos', subtitle: 'João', w: 250, h: 190 },
@@ -253,21 +255,27 @@
             if (!nodes['concluido_1']) {
                 nodes['concluido_1'] = { x: 1800, y: 150, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 };
                 if (nodes['produz_cracha_1']) nodes['produz_cracha_1'].conclusion = false;
-                if (!edges.find(e => e.from === 'produz_cracha_1' && e.to === 'concluido_1')) {
-                    edges.push({ id: 'edge_mig_1', from: 'produz_cracha_1', to: 'concluido_1', exit: 'right-2', enter: 'left-2', label: '' });
-                }
+                if (!edges.find(e => e.from === 'produz_cracha_1' && e.to === 'concluido_1')) edges.push({ id: 'edge_mig_1', from: 'produz_cracha_1', to: 'concluido_1', exit: 'right-2', enter: 'left-2', label: '' });
                 modified = true;
             }
             if (!nodes['concluido_2']) {
                 nodes['concluido_2'] = { x: 1800, y: 1650, title: 'Concluído', subtitle: 'FINALIZADO', conclusion: true, w: 250, h: 190 };
                 if (nodes['produz_cracha_2']) nodes['produz_cracha_2'].conclusion = false;
-                if (!edges.find(e => e.from === 'produz_cracha_2' && e.to === 'concluido_2')) {
-                    edges.push({ id: 'edge_mig_2', from: 'produz_cracha_2', to: 'concluido_2', exit: 'right-2', enter: 'left-2', label: '' });
-                }
+                if (!edges.find(e => e.from === 'produz_cracha_2' && e.to === 'concluido_2')) edges.push({ id: 'edge_mig_2', from: 'produz_cracha_2', to: 'concluido_2', exit: 'right-2', enter: 'left-2', label: '' });
                 modified = true;
             }
             if (modified) saveData();
         }
+
+        // Tenta carregar Cache Local em caso de lentidão
+        try {
+            const savedWorks = JSON.parse(localStorage.getItem('kanbanObras'));
+            if (Array.isArray(savedWorks)) works = savedWorks;
+            const savedNodes = JSON.parse(localStorage.getItem('kanbanNodes'));
+            if (savedNodes && typeof savedNodes === 'object' && Object.keys(savedNodes).length > 0) nodes = savedNodes;
+            const savedEdges = JSON.parse(localStorage.getItem('kanbanEdges'));
+            if (Array.isArray(savedEdges) && savedEdges.length > 0) edges = savedEdges;
+        } catch(e) {}
 
         // =========================================================
         // 3. SINCRONIZAÇÃO EM TEMPO REAL (FIREBASE)
@@ -324,7 +332,7 @@
                 div.innerHTML = `
                     ${anchorsHtml}
                     <div class="resize-handle" onmousedown="startNodeResize(event, '${id}')"></div>
-                    <div class="drag-handle" onmousedown="startNodeDrag(event, '${id}')">⠿ Mover</div>
+                    <div class="drag-handle" onmousedown="startNodeDrag(event, '${id}')" oncontextmenu="showContextMenu(event, 'node', '${id}')">⠿ Mover</div>
                     <div class="node-content">
                         <div class="node-title" contenteditable="true" onblur="updateNodeText('${id}', 'title', this.innerText)">${node.title || ''}</div>
                         <div class="node-subtitle" contenteditable="true" onblur="updateNodeText('${id}', 'subtitle', this.innerText)">${node.subtitle || ''}</div>
@@ -350,7 +358,90 @@
         }
 
         // =========================================================
-        // DRAG E DROP DE OBRAS
+        // CRIAÇÃO DE NOVOS PROCESSOS (QUADRADOS)
+        // =========================================================
+        function createNode() {
+            const id = 'node_' + Date.now().toString() + Math.random().toString(36).substring(2, 6);
+            
+            // Pega o centro atual da tela levando em conta o Pan e o Zoom
+            const centerX = Math.round((-panX + (window.innerWidth / 2) / scale) / 50) * 50;
+            const centerY = Math.round((-panY + (window.innerHeight / 2) / scale) / 50) * 50;
+
+            nodes[id] = { x: centerX, y: centerY, title: 'Novo Processo', subtitle: 'RESPONSÁVEL', conclusion: false, w: 250, h: 190 };
+            saveData();
+            render();
+        }
+
+        // =========================================================
+        // MENU DE CONTEXTO UNIVERSAL (SETAS E QUADRADOS)
+        // =========================================================
+        let activeContextType = null; // 'edge' ou 'node'
+        let activeContextId = null;
+
+        function showContextMenu(e, type, id) {
+            e.preventDefault(); e.stopPropagation(); 
+            activeContextType = type; activeContextId = id;
+            
+            const menu = document.getElementById('context-menu');
+            
+            if (type === 'edge') {
+                menu.innerHTML = `
+                    <div class="context-menu-item" onclick="contextEditEdge()">✏️ Editar Texto</div>
+                    <div class="context-menu-item danger" onclick="contextDeleteEdge()">🗑️ Excluir Seta</div>
+                `;
+            } else if (type === 'node') {
+                const node = nodes[id];
+                const typeText = node.conclusion ? "Mudar para Processo Normal" : "Mudar para Conclusão";
+                menu.innerHTML = `
+                    <div class="context-menu-item" onclick="contextToggleNodeType()">🔄 ${typeText}</div>
+                    <div class="context-menu-item danger" onclick="contextDeleteNode()">🗑️ Excluir Quadrado</div>
+                `;
+            }
+
+            menu.style.display = 'flex'; menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+        }
+
+        function hideContextMenu() { document.getElementById('context-menu').style.display = 'none'; activeContextType = null; activeContextId = null; }
+        document.addEventListener('click', hideContextMenu);
+        document.addEventListener('mousedown', (e) => { if(!e.target.closest('#context-menu')) hideContextMenu(); });
+
+        function contextEditEdge() {
+            if(activeContextType !== 'edge' || !activeContextId) return;
+            const edge = edges.find(e => e.id === activeContextId);
+            if(edge) { const newLabel = prompt("Digite o texto da seta (deixe vazio para remover):", edge.label || ""); if (newLabel !== null) { edge.label = newLabel.trim(); saveData(); drawEdges(); } }
+            hideContextMenu();
+        }
+
+        function contextDeleteEdge() {
+            if(activeContextType !== 'edge' || !activeContextId) return;
+            if(confirm('Excluir esta seta?')) { edges = edges.filter(e => e.id !== activeContextId); saveData(); render(); }
+            hideContextMenu();
+        }
+
+        function contextToggleNodeType() {
+            if(activeContextType !== 'node' || !activeContextId) return;
+            nodes[activeContextId].conclusion = !nodes[activeContextId].conclusion;
+            saveData(); render(); hideContextMenu();
+        }
+
+        function contextDeleteNode() {
+            if(activeContextType !== 'node' || !activeContextId) return;
+            if(confirm('Excluir este processo? Todas as setas ligadas a ele e as obras dentro dele serão removidas.')) {
+                // Remove Obras dentro do nó
+                works = works.filter(w => w.node !== activeContextId);
+                // Remove Setas ligadas ao nó
+                edges = edges.filter(e => e.from !== activeContextId && e.to !== activeContextId);
+                // Remove o Nó
+                delete nodes[activeContextId];
+                
+                saveData(); render();
+            }
+            hideContextMenu();
+        }
+
+
+        // =========================================================
+        // DRAG E DROP DE OBRAS (TEXT/PLAIN)
         // =========================================================
         let draggedWorkId = null; 
 
@@ -401,7 +492,7 @@
         }
 
         // =========================================================
-        // MOTOR GLOBAL DE INTERAÇÃO
+        // MOTOR GLOBAL DE INTERAÇÃO (CAIXAS, SETAS E PAN)
         // =========================================================
         let isPanning = false, startX = 0, startY = 0, panX = 100, panY = 100, scale = 0.8;
         let isDraggingNode = false, activeNode = null;
@@ -520,32 +611,7 @@
 
         document.getElementById('zoom-layer').style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
 
-        /* ==== MENU DE CONTEXTO NAS SETAS ==== */
-        let activeContextMenuEdgeId = null;
-        function showContextMenu(e, edgeId) {
-            e.preventDefault(); e.stopPropagation(); activeContextMenuEdgeId = edgeId;
-            const menu = document.getElementById('context-menu');
-            menu.style.display = 'flex'; menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
-        }
-
-        function hideContextMenu() { document.getElementById('context-menu').style.display = 'none'; activeContextMenuEdgeId = null; }
-        document.addEventListener('click', hideContextMenu);
-        document.addEventListener('mousedown', (e) => { if(!e.target.closest('#context-menu')) hideContextMenu(); });
-
-        function contextEditEdge() {
-            if(!activeContextMenuEdgeId) return;
-            const edge = edges.find(e => e.id === activeContextMenuEdgeId);
-            if(edge) { const newLabel = prompt("Digite o texto da seta (deixe vazio para remover o texto):", edge.label || ""); if (newLabel !== null) { edge.label = newLabel.trim(); saveData(); drawEdges(); } }
-            hideContextMenu();
-        }
-
-        function contextDeleteEdge() {
-            if(!activeContextMenuEdgeId) return;
-            if(confirm('Excluir esta seta?')) { edges = edges.filter(e => e.id !== activeContextMenuEdgeId); saveData(); render(); }
-            hideContextMenu();
-        }
-
-        /* ==== LÓGICA DE DESENHO DE SETAS E LIMPEZA VISUAL ==== */
+        /* ==== LÓGICA DE DESENHO E OCULTAÇÃO DE LINHAS ==== */
         function drawEdges() {
             const svg = document.getElementById('edges-svg');
             const labelsContainer = document.getElementById('labels-container');
@@ -563,7 +629,7 @@
             works.forEach(work => {
                 const currentNode = nodes[work.node];
                 
-                // Ocultar histórico de linhas das obras que já foram finalizadas
+                // Limpeza inteligente
                 if (currentNode && (currentNode.conclusion === true || /^conclu[íi]do$/i.test((currentNode.title || '').trim()))) {
                     return; 
                 }
@@ -590,7 +656,7 @@
 
                 const hitboxPath = createSVGPath(points, 'transparent', 24, false);
                 hitboxPath.style.pointerEvents = 'stroke'; hitboxPath.style.cursor = 'context-menu';
-                hitboxPath.oncontextmenu = (e) => showContextMenu(e, edge.id); svg.appendChild(hitboxPath);
+                hitboxPath.oncontextmenu = (e) => showContextMenu(e, 'edge', edge.id); svg.appendChild(hitboxPath);
 
                 if (points.length >= 3) {
                     const midIndex = Math.floor(points.length / 2); const c1 = points[midIndex - 1], c2 = points[midIndex];
@@ -607,7 +673,7 @@
                     const midPoint = getExactMidPoint(points);
                     const labelDiv = document.createElement('div');
                     labelDiv.className = 'edge-label'; labelDiv.innerText = edge.label;
-                    labelDiv.oncontextmenu = (e) => showContextMenu(e, edge.id);
+                    labelDiv.oncontextmenu = (e) => showContextMenu(e, 'edge', edge.id);
                     labelDiv.style.left = midPoint.x + 'px'; labelDiv.style.top = midPoint.y + 'px'; labelsContainer.appendChild(labelDiv);
                 }
 
@@ -733,9 +799,6 @@
             return null;
         }
 
-        // =========================================================
-        // EXPORTAÇÃO E IMPORTAÇÃO DE BACKUP
-        // =========================================================
         function exportData() {
             const backup = { works, nodes, edges };
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup));
@@ -751,21 +814,12 @@
                 try {
                     const data = JSON.parse(e.target.result);
                     if (data.nodes && data.edges) {
-                        works = data.works || [];
-                        nodes = data.nodes;
-                        edges = data.edges;
-                        colorIndex = works.length;
-                        saveData();
-                        render();
-                    } else {
-                        alert("Arquivo de backup inválido.");
-                    }
-                } catch(err) {
-                    alert("Erro ao ler o arquivo JSON.");
-                }
+                        works = data.works || []; nodes = data.nodes; edges = data.edges;
+                        saveData(); render();
+                    } else { alert("Arquivo de backup inválido."); }
+                } catch(err) { alert("Erro ao ler o arquivo JSON."); }
             };
-            reader.readAsText(file);
-            event.target.value = '';
+            reader.readAsText(file); event.target.value = '';
         }
     </script>
 </body>
